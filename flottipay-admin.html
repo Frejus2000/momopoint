@@ -191,7 +191,7 @@ const sb = createClient(SB_URL, SB_KEY);
 
 const PLANS=[
   {id:'mensuel', icon:'📅',name:'Mensuel',    price:'1 500 F', priceN:1500, days:30, feat:'Gérants illimités · 30 jours'},
-  {id:'trim',    icon:'📆',name:'Trimestriel',price:'4 000 F',priceN:4000,days:90, feat:'Gérants illimités · 90 jours',pop:true},
+  {id:'trim',    icon:'📆',name:'Trimestriel',price:'4 000 F', priceN:4000, days:90, feat:'Gérants illimités · 90 jours',pop:true},
   {id:'annuel',  icon:'🗓️',name:'Annuel',     price:'15 000 F',priceN:15000,days:365,feat:'Gérants illimités · 365 jours'},
 ];
 
@@ -409,7 +409,7 @@ function selectPlan(el, pid){
 }
 
 function doGen(){
-  const p = currentPlan; // ← utilise currentPlan
+  const p = currentPlan;
   if(!p){toast('⚠️ Sélectionnez un plan');return;}
   const name=document.getElementById('kgName').value.trim();
   if(!name){toast('⚠️ Entrez le nom du propriétaire');return;}
@@ -422,12 +422,36 @@ function doGen(){
 }
 
 async function doSave(){
-  const p = currentPlan; // ← utilise currentPlan
-  if(!genKey||!p)return;
-  const end=new Date();end.setDate(end.getDate()+p.days);
-  const{error}=await sb.from('licenses').insert({key:genKey,plan:p.name,days:p.days,status:'pending',end_date:end.toISOString().slice(0,10)});
-  if(error){toast('❌ '+error.message);return;}
-  toast('✅ Licence enregistrée en base !');
+  const p = currentPlan;
+  if(!genKey||!p){toast('⚠️ Générez d\'abord une clé');return;}
+
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session){toast('❌ Session expirée, reconnectez-vous.');return;}
+
+  const end=new Date();
+  end.setDate(end.getDate()+p.days);
+
+  const{data:existing}=await sb.from('licenses').select('key').eq('key',genKey);
+  if(existing&&existing.length>0){toast('⚠️ Clé déjà existante — régénérez-en une');return;}
+
+  const{data,error}=await sb.from('licenses').insert({
+    key:     genKey,
+    plan:    p.name,
+    days:    p.days,
+    status:  'pending',
+    end_date:end.toISOString().slice(0,10),
+  }).select();
+
+  if(error){
+    console.error('Erreur insert licence:',error);
+    if(error.code==='42501'){
+      toast('❌ Permission refusée — exécutez flottipay-fix-rls.sql dans Supabase');
+    } else {
+      toast('❌ '+error.message);
+    }
+    return;
+  }
+  toast('✅ Licence enregistrée ! Clé : '+genKey);
   loadRecent();
   document.getElementById('savBtn').disabled=true;
   document.getElementById('savBtn').style.opacity='.4';
@@ -445,7 +469,7 @@ function doWA(){
     `📦 Plan : ${p?.name||'—'} (${p?.days||0} jours)\n`+
     `♾️ Gérants illimités inclus\n\n`+
     `🌐 Créez votre compte ici :\n`+
-    `👉 https://flottipay-app.html\n\n`+
+    `👉 https://TON-SITE.netlify.app/flottipay-app.html\n\n`+
     `⚠️ Cette clé est personnelle et ne peut être utilisée qu'une seule fois.\n\n`+
     `_— FlottiPay, gestion de cabines mobile money_`
   );
