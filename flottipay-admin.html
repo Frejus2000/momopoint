@@ -128,7 +128,7 @@ tr:last-child td{border-bottom:none;}
 tr:hover td{background:rgba(255,255,255,.02);}
 .action-btn{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;border:none;font-family:'Syne',sans-serif;margin-right:3px;}
 .spin{display:inline-block;width:22px;height:22px;border-radius:50%;border:3px solid var(--border2);border-top-color:var(--purple);animation:spin .7s linear infinite;}
-.loader{display:flex;align-items:center;justify-content:center;height:200px;gap:10px;color:var(--muted2);font-size:12px;}
+.loader{display:flex;align-items:center;justify-content:height:200px;gap:10px;color:var(--muted2);font-size:12px;}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(12px);background:var(--card2);border:1px solid var(--border2);border-radius:10px;padding:9px 18px;font-size:12px;font-weight:600;color:var(--text);z-index:200;opacity:0;transition:all .22s;pointer-events:none;white-space:nowrap;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -197,7 +197,10 @@ const PLANS=[
   {id:'annuel',  icon:'🗓️',name:'Annuel',     price:'40 000 F',priceN:40000,days:365,feat:'Gérants illimités · 365 jours'},
 ];
 
-let selPlan=null,genKey=null,curPage=0;
+/* ══ ÉTAT GLOBAL ══ */
+let currentPlan = null; // ← renommé (était selPlan, en conflit avec la fonction selPlan)
+let genKey = null;
+let curPage = 0;
 
 /* ══ HELPERS ══ */
 function toast(m,d=2400){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),d);}
@@ -328,11 +331,8 @@ async function revokeLic(key,name){
 
 async function deleteOwner(ownerId,name){
   if(!ownerId||!confirm(`⚠️ SUPPRIMER ${name} ?\n\nCela supprimera :\n• Son compte\n• Tous ses gérants\n• Toutes ses transactions\n• Tous ses réseaux\n\nCette action est IRRÉVERSIBLE.`))return;
-  // Supprimer en cascade via RLS + ON DELETE CASCADE dans le schéma
-  // 1. Supprimer le profil owner (cascade sur tout)
   const{error:e1}=await sb.from('owners').delete().eq('id',ownerId);
   if(e1){toast('❌ Erreur suppression profil : '+e1.message);return;}
-  // 2. Mettre la licence en revoked
   await sb.from('licenses').update({status:'revoked',owner_id:null}).eq('owner_id',ownerId);
   toast(`✅ ${name} et toutes ses données ont été supprimés.`);
   pageLic();
@@ -355,7 +355,7 @@ function pageKg(){
       <div class="card">
         <div class="sh"><div class="st">2. Plan de licence</div></div>
         <div class="plan-grid">
-          ${PLANS.map(p=>`<div class="pcard ${p.pop?'pop':''}" onclick="selPlan(this,'${p.id}')" data-pid="${p.id}">
+          ${PLANS.map(p=>`<div class="pcard ${p.pop?'pop':''}" onclick="selectPlan(this,'${p.id}')" data-pid="${p.id}">
             <div class="pname">${p.icon} ${p.name}</div>
             <div class="pprice">${p.price}</div>
             <div class="pfeat">${p.feat}</div>
@@ -403,13 +403,15 @@ async function loadRecent(){
   </div>`).join('');
 }
 
-function selPlan(el,pid){
-  document.querySelectorAll('[data-pid]').forEach(e=>e.classList.remove('sel'));
+/* ── selectPlan : renommé (était selPlan, en conflit avec la variable selPlan) ── */
+function selectPlan(el, pid){
+  document.querySelectorAll('[data-pid]').forEach(e => e.classList.remove('sel'));
   el.classList.add('sel');
-  selPlan._plan=PLANS.find(p=>p.id===pid);
+  currentPlan = PLANS.find(p => p.id === pid); // ← utilise currentPlan
 }
+
 function doGen(){
-  const p=selPlan._plan;
+  const p = currentPlan; // ← utilise currentPlan
   if(!p){toast('⚠️ Sélectionnez un plan');return;}
   const name=document.getElementById('kgName').value.trim();
   if(!name){toast('⚠️ Entrez le nom du propriétaire');return;}
@@ -420,9 +422,10 @@ function doGen(){
   ['savBtn','waBtn'].forEach(id=>{const b=document.getElementById(id);b.disabled=false;b.style.opacity='1';});
   toast('⚡ Clé générée !');
 }
+
 async function doSave(){
-  if(!genKey||!selPlan._plan)return;
-  const p=selPlan._plan;
+  const p = currentPlan; // ← utilise currentPlan
+  if(!genKey||!p)return;
   const end=new Date();end.setDate(end.getDate()+p.days);
   const{error}=await sb.from('licenses').insert({key:genKey,plan:p.name,days:p.days,status:'pending',end_date:end.toISOString().slice(0,10)});
   if(error){toast('❌ '+error.message);return;}
@@ -431,11 +434,12 @@ async function doSave(){
   document.getElementById('savBtn').disabled=true;
   document.getElementById('savBtn').style.opacity='.4';
 }
+
 function doWA(){
   if(!genKey)return;
   const name=document.getElementById('kgName').value.trim();
   const phone=document.getElementById('kgPhone').value.trim().replace(/\s+/g,'');
-  const p=selPlan._plan;
+  const p = currentPlan; // ← utilise currentPlan
   const msg=encodeURIComponent(
     `Bonjour ${name} 👋\n\n`+
     `Votre licence FlottiPay est prête !\n\n`+
