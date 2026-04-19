@@ -56,15 +56,14 @@ body::after{content:'';position:fixed;top:-20%;left:50%;transform:translateX(-50
 .tbr{display:flex;align-items:center;gap:8px;}
 .tbadge{padding:4px 10px;border-radius:11px;font-size:10px;font-weight:700;font-family:'Syne',sans-serif;background:rgba(176,159,255,.1);color:var(--purple);border:1px solid rgba(176,159,255,.22);}
 .lout{padding:5px 10px;border-radius:7px;background:rgba(255,61,90,.08);border:1px solid rgba(255,61,90,.18);color:var(--red);font-size:11px;font-weight:600;cursor:pointer;}
-.abody{flex:1;display:flex;overflow:hidden;}
-.sidebar{width:200px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:14px 9px;}
-.sn{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:var(--r2);cursor:pointer;margin-bottom:3px;transition:background .15s;}
+.abody{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.bottomnav{display:flex;align-items:center;justify-content:space-around;background:var(--card);border-top:1px solid var(--border2);flex-shrink:0;padding:6px 0 10px;}
+.sn{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 18px;border-radius:var(--r2);cursor:pointer;transition:background .15s;flex:1;}
 .sn:hover{background:rgba(255,255,255,.04);}
-.sn.active{background:rgba(176,159,255,.1);}
-.sn-ico{font-size:17px;width:24px;text-align:center;}
-.sn-lbl{font-size:13px;font-weight:600;color:var(--muted3);}
+.sn.active{background:rgba(176,159,255,.08);}
+.sn-ico{font-size:22px;}
+.sn-lbl{font-size:10px;font-weight:600;color:var(--muted3);letter-spacing:.3px;}
 .sn.active .sn-lbl{color:var(--purple);}
-.sf{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);font-size:10px;color:var(--muted);padding-left:4px;}
 .mc{flex:1;overflow-y:auto;padding:18px;}
 .mc::-webkit-scrollbar{width:4px;}
 .mc::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
@@ -168,15 +167,14 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <div class="tbr"><div class="tbadge">🛡️ ADMIN</div><div class="lout" onclick="doLogout()">Déconnexion</div></div>
   </div>
   <div class="abody">
-    <div class="sidebar">
-      <div class="sn active" id="sn0" onclick="goP(0)"><div class="sn-ico">📊</div><div class="sn-lbl">Tableau de bord</div></div>
+    <div class="mc" id="mc"><div class="loader"><div class="spin"></div>Chargement...</div></div>
+    <div class="bottomnav">
+      <div class="sn active" id="sn0" onclick="goP(0)"><div class="sn-ico">📊</div><div class="sn-lbl">Tableau</div></div>
       <div class="sn" id="sn1" onclick="goP(1)"><div class="sn-ico">🔑</div><div class="sn-lbl">Licences</div></div>
-      <div class="sn" id="sn2" onclick="goP(2)"><div class="sn-ico">✨</div><div class="sn-lbl">Générateur</div></div>
+      <div class="sn" id="sn2" onclick="goP(2)"><div class="sn-ico">✨</div><div class="sn-lbl">Keygen</div></div>
       <div class="sn" id="sn3" onclick="goP(3)"><div class="sn-ico">👑</div><div class="sn-lbl">Propriétaires</div></div>
       <div class="sn" id="sn4" onclick="goP(4)"><div class="sn-ico">💰</div><div class="sn-lbl">Recettes</div></div>
-      <div class="sf">FlottiPay v3.0</div>
     </div>
-    <div class="mc" id="mc"><div class="loader"><div class="spin"></div>Chargement...</div></div>
   </div>
 </div>
 
