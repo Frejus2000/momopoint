@@ -303,6 +303,18 @@ body{background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--text);dis
 <!-- MODAL DEMANDE SUPPRESSION -->
 <div class="mover" id="delM"><div class="msheet"><div class="mhandle"></div><div class="mhead"><div class="mtitle">🗑️ Demander suppression</div><div class="mclose" onclick="closeM('delM')">✕</div></div><div class="mbody"><div style="padding:10px 12px;background:var(--card2);border:1px solid var(--border2);border-radius:10px;"><div style="font-size:10px;color:var(--muted2);margin-bottom:3px;">Transaction</div><div style="font-size:12px;font-weight:700;" id="delTxInfo">—</div></div><div><label class="lbl">Motif</label><textarea class="fi2" id="delReason" rows="3" placeholder="Expliquez pourquoi cette transaction doit être supprimée..."></textarea></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div style="padding:10px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;text-align:center;font-size:12px;color:var(--muted2);font-weight:700;cursor:pointer;" onclick="closeM('delM')">Annuler</div><button class="btn" style="background:rgba(255,61,90,.12);color:var(--red);border:1px solid rgba(255,61,90,.22);" onclick="submitDel()">📤 Soumettre</button></div></div></div></div>
 
+<!-- MODAL CAPITAL GÉRANT -->
+<div class="mover" id="mgrCapM">
+  <div class="msheet">
+    <div class="mhandle"></div>
+    <div class="mhead">
+      <div class="mtitle" id="mgrCapTitle">🏦 Capital gérant</div>
+      <div class="mclose" onclick="closeM('mgrCapM')">✕</div>
+    </div>
+    <div class="mbody" id="mgrCapBody"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -487,10 +499,58 @@ async function checkAndLoadOwner(){
   if(!lic||lic.status==='expired'||lic.status==='revoked'||new Date(lic.end_date)<new Date()){
     document.getElementById('blockedIco').textContent='🔒';
     document.getElementById('blockedTitle').textContent='Votre licence a expiré';
-    document.getElementById('blockedMsg').textContent='Votre accès et celui de vos gérants est suspendu. Contactez l\'administrateur FlottiPay pour renouveler votre licence.';
-    document.getElementById('blockedActions').innerHTML=`<div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted2);margin-bottom:12px;">Clé : ${A.profile.license_key}</div>`;
+    document.getElementById('blockedMsg').textContent='Votre accès et celui de vos gérants est suspendu. Entrez une nouvelle clé de licence valide pour rétablir l\'accès.';
+    document.getElementById('blockedActions').innerHTML=`
+      <div style="margin-bottom:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted2);">Clé actuelle : ${A.profile.license_key||'—'}</div>
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Nouvelle clé de licence</div>
+        <input id="renewKey" type="text" placeholder="FP-XXXX-XXXX-XXXX"
+          style="width:100%;padding:11px 13px;background:var(--bg3);border:1.5px solid var(--border2);border-radius:var(--r2);color:var(--text);font-size:13px;font-family:'JetBrains Mono',monospace;outline:none;letter-spacing:1px;text-transform:uppercase;"
+          oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div id="renewErr" style="display:none;padding:7px 10px;background:rgba(255,61,90,.08);border:1px solid rgba(255,61,90,.18);border-radius:8px;font-size:11px;color:var(--red);margin-bottom:8px;"></div>
+      <button onclick="doRenewLicense()"
+        style="width:100%;padding:12px;border-radius:var(--r2);border:none;background:linear-gradient(135deg,var(--accent),#00b87c);color:#000;font-family:'Syne',sans-serif;font-size:13px;font-weight:800;cursor:pointer;">
+        🔑 Activer la nouvelle licence →
+      </button>`;
     showV('blocked');return;
   }
+  const d=dl(lic.end_date);
+  if(d<=5&&d>0){document.getElementById('oExpMsg').textContent=`⚠️ Votre licence expire dans ${d} jour${d>1?'s':''}. Renouvelez pour éviter la suspension.`;document.getElementById('oExpBanner').classList.add('show');}
+  document.getElementById('oTitle').textContent=A.profile.cabin_name||'Ma Cabine';
+  document.getElementById('oSub').textContent=A.profile.full_name;
+  const[{data:nets},{data:mgrs},{data:notifs}]=await Promise.all([
+    sb.from('networks').select('*').eq('owner_id',A.profile.id).order('created_at'),
+    sb.from('managers').select('*').eq('owner_id',A.profile.id),
+    sb.from('notifications').select('*').eq('user_id',A.user.id).order('created_at',{ascending:false}).limit(30),
+  ]);
+  A.nets=nets||[];A.managers=mgrs||[];A.notifs=notifs||[];
+  updateDot('owner');showV('app-owner');oTab(0);startRealtime();
+}
+
+async function doRenewLicense(){
+  const key=(document.getElementById('renewKey')?.value||'').trim().toUpperCase();
+  const errEl=document.getElementById('renewErr');
+  errEl.style.display='none';
+  if(!key){errEl.textContent='Entrez une clé de licence.';errEl.style.display='block';return;}
+  // Vérifier que la clé existe et est en statut pending
+  const{data:licRow}=await sb.from('licenses').select('*').eq('key',key).maybeSingle();
+  if(!licRow){errEl.textContent='Clé invalide ou introuvable.';errEl.style.display='block';return;}
+  if(licRow.status!=='pending'){errEl.textContent='Cette clé a déjà été utilisée ou est expirée.';errEl.style.display='block';return;}
+  // Révoquer l'ancienne licence
+  if(A.profile.license_key){
+    await sb.from('licenses').update({status:'revoked'}).eq('key',A.profile.license_key);
+  }
+  // Activer la nouvelle
+  const today=new Date().toISOString().slice(0,10);
+  await sb.from('licenses').update({owner_id:A.profile.id,status:'active',start_date:today}).eq('key',key);
+  // Mettre à jour le profil propriétaire
+  await sb.from('owners').update({license_key:key}).eq('id',A.profile.id);
+  A.profile.license_key=key;
+  toast('✅ Licence renouvelée avec succès !');
+  // Recharger l'app
+  await checkAndLoadOwner();
+}
   const d=dl(lic.end_date);
   if(d<=5&&d>0){document.getElementById('oExpMsg').textContent=`⚠️ Votre licence expire dans ${d} jour${d>1?'s':''}. Renouvelez pour éviter la suspension.`;document.getElementById('oExpBanner').classList.add('show');}
   document.getElementById('oTitle').textContent=A.profile.cabin_name||'Ma Cabine';
@@ -550,37 +610,47 @@ function startRealtime(){
 }
 
 function updateDot(role){
-  const u=A.notifs.filter(n=>!n.read).length;
+  // Le point rouge s'affiche s'il y a au moins une notification non lue
+  const unread=A.notifs.filter(n=>!n.read).length;
   const dot=document.getElementById(role==='owner'?'oNDot':'mNDot');
-  if(dot)dot.classList.toggle('show',u>0);
+  if(dot)dot.classList.toggle('show',unread>0);
 }
 
 function renderNotifs(){
   const c=document.getElementById('notifList');
+  if(!c)return;
   if(!A.notifs.length){c.innerHTML='<div class="empty">Aucune notification</div>';return;}
   c.innerHTML=A.notifs.map(n=>{
     const icons={manager_request:'👤',request_approved:'✅',request_rejected:'❌',deletion_request:'🗑️',deletion_approved:'✅',deletion_rejected:'❌',license_expiry:'⚠️'};
-    return `<div class="ni-item ${!n.read?'unread':''}" onclick="markRead('${n.id}')">
-      <div class="ni-title">${icons[n.type]||'🔔'} ${n.type==='manager_request'?'Demande gérant':n.type==='request_approved'?'Demande approuvée':n.type==='request_rejected'?'Demande refusée':n.type==='deletion_request'?'Suppression demandée':n.type==='deletion_approved'?'Suppression approuvée':n.type==='deletion_rejected'?'Suppression refusée':'Expiration licence'}</div>
-      <div class="ni-msg">${n.message}</div>
-      <div class="ni-time">${new Date(n.created_at).toLocaleString('fr-FR')}</div>
-      ${n.type==='manager_request'&&A.role==='owner'?`<div style="display:flex;gap:6px;margin-top:8px;">
-        <button onclick="event.stopPropagation();approveMgr('${n.data?.manager_id}','${n.data?.request_id}')" style="padding:5px 12px;border-radius:8px;background:rgba(0,232,150,.12);border:1px solid rgba(0,232,150,.25);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;">✅ Approuver</button>
-        <button onclick="event.stopPropagation();rejectMgr('${n.data?.manager_id}','${n.data?.request_id}')" style="padding:5px 12px;border-radius:8px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);color:var(--red);font-size:11px;font-weight:700;cursor:pointer;">❌ Refuser</button>
-      </div>`:''}
-      ${n.type==='deletion_request'&&A.role==='owner'?`<div style="display:flex;gap:6px;margin-top:8px;">
-        <button onclick="event.stopPropagation();handleDel('${n.data?.request_id}','approved')" style="padding:5px 12px;border-radius:8px;background:rgba(0,232,150,.12);border:1px solid rgba(0,232,150,.25);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;">✅ Approuver</button>
-        <button onclick="event.stopPropagation();handleDel('${n.data?.request_id}','rejected')" style="padding:5px 12px;border-radius:8px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);color:var(--red);font-size:11px;font-weight:700;cursor:pointer;">❌ Refuser</button>
-      </div>`:''}
+    const title={manager_request:'Demande gérant',request_approved:'Demande approuvée',request_rejected:'Demande refusée',deletion_request:'Suppression demandée',deletion_approved:'Suppression approuvée',deletion_rejected:'Suppression refusée',license_expiry:'Expiration licence'};
+    return `<div class="ni-item ${!n.read?'unread':''}" style="position:relative;">
+      <div style="position:absolute;top:8px;right:10px;width:22px;height:22px;border-radius:6px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();markRead('${n.id}')">✕</div>
+      <div onclick="markRead('${n.id}')" style="padding-right:28px;">
+        <div class="ni-title">${icons[n.type]||'🔔'} ${title[n.type]||'Notification'}</div>
+        <div class="ni-msg">${n.message}</div>
+        <div class="ni-time">${new Date(n.created_at).toLocaleString('fr-FR')}</div>
+        ${n.type==='manager_request'&&A.role==='owner'?`<div style="display:flex;gap:6px;margin-top:8px;">
+          <button onclick="event.stopPropagation();approveMgr('${n.data?.manager_id}','${n.data?.request_id}')" style="padding:5px 12px;border-radius:8px;background:rgba(0,232,150,.12);border:1px solid rgba(0,232,150,.25);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;">✅ Approuver</button>
+          <button onclick="event.stopPropagation();rejectMgr('${n.data?.manager_id}','${n.data?.request_id}')" style="padding:5px 12px;border-radius:8px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);color:var(--red);font-size:11px;font-weight:700;cursor:pointer;">❌ Refuser</button>
+        </div>`:''}
+        ${n.type==='deletion_request'&&A.role==='owner'?`<div style="display:flex;gap:6px;margin-top:8px;">
+          <button onclick="event.stopPropagation();handleDel('${n.data?.request_id}','approved')" style="padding:5px 12px;border-radius:8px;background:rgba(0,232,150,.12);border:1px solid rgba(0,232,150,.25);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;">✅ Approuver</button>
+          <button onclick="event.stopPropagation();handleDel('${n.data?.request_id}','rejected')" style="padding:5px 12px;border-radius:8px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);color:var(--red);font-size:11px;font-weight:700;cursor:pointer;">❌ Refuser</button>
+        </div>`:''}
+      </div>
     </div>`;
   }).join('');
 }
 
 async function markRead(id){
-  // Delete notification once seen (instead of just marking read)
-  await sb.from('notifications').delete().eq('id',id);
+  // Supprimer définitivement de la base
+  const{error}=await sb.from('notifications').delete().eq('id',id);
+  if(error){ toast('❌ '+error.message); return; }
+  // Retirer du tableau local
   A.notifs=A.notifs.filter(n=>n.id!==id);
+  // Mettre à jour le point rouge
   updateDot(A.role);
+  // Re-rendre la liste (le panneau est encore ouvert)
   renderNotifs();
 }
 async function approveMgr(mgrId,reqId){
@@ -688,9 +758,9 @@ async function oMgrs(){
     </div>`).join('')}
   </div>`:''}
   ${(mgrs||[]).map(m=>`
-  <div class="card" style="margin-bottom:9px;cursor:pointer;" onclick="openMgrD('${m.id}')">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${m.status==='active'?'9':'0'}px;">
-      <div style="display:flex;align-items:center;gap:9px;">
+  <div class="card" style="margin-bottom:9px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+      <div style="display:flex;align-items:center;gap:9px;cursor:pointer;" onclick="openMgrD('${m.id}')">
         <div style="width:35px;height:35px;border-radius:10px;background:${m.status==='active'?'rgba(0,232,150,.1)':'rgba(255,255,255,.04)'};display:flex;align-items:center;justify-content:center;font-size:15px;">👤</div>
         <div><div style="font-size:13px;font-weight:700;">${m.full_name}</div><div style="font-size:10px;color:var(--muted2);">@${m.username} · ${m.phone||'—'}</div></div>
       </div>
@@ -699,8 +769,53 @@ async function oMgrs(){
         <button onclick="event.stopPropagation();delMgr('${m.id}','${m.full_name}')" style="padding:3px 8px;border-radius:6px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);color:var(--red);font-size:10px;cursor:pointer;">🗑️</button>
       </div>
     </div>
-    ${m.status==='active'?'<div style="font-size:10px;color:var(--accent2);text-align:right;">Voir transactions →</div>':''}
+    ${m.status==='active'?`<div style="display:flex;gap:6px;">
+      <button onclick="openMgrD('${m.id}')" style="flex:1;padding:6px;border-radius:8px;background:rgba(61,139,255,.07);border:1px solid rgba(61,139,255,.18);color:var(--accent2);font-size:10px;font-weight:700;cursor:pointer;">📊 Transactions</button>
+      <button onclick="openMgrCap('${m.id}','${m.full_name}')" style="flex:1;padding:6px;border-radius:8px;background:rgba(255,201,77,.07);border:1px solid rgba(255,201,77,.18);color:var(--yellow);font-size:10px;font-weight:700;cursor:pointer;">🏦 Capital</button>
+    </div>`:''}
   </div>`).join('')||'<div class="empty">Aucun gérant inscrit<br><span style="font-size:11px;">Partagez le code <strong>'+A.profile.invite_code+'</strong></span></div>'}`;
+}
+
+// Ouvre le modal capital pour un gérant spécifique
+async function openMgrCap(mgrId,mgrName){
+  A._capMgrId=mgrId;
+  // Charger les capitaux existants pour ce gérant
+  const{data:existing}=await sb.from('manager_networks').select('network_id,capital').eq('manager_id',mgrId);
+  const capMap={};
+  (existing||[]).forEach(mn=>{capMap[mn.network_id]=mn.capital||0;});
+  // Construire le modal
+  document.getElementById('mgrCapTitle').textContent=`🏦 Capital de ${mgrName}`;
+  document.getElementById('mgrCapBody').innerHTML=`
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:12px;">Entrez le capital remis à ce gérant pour chaque réseau</div>
+    ${A.nets.filter(n=>n.active).map(n=>`
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <div style="width:9px;height:9px;border-radius:50%;background:${n.color};flex-shrink:0;"></div>
+        <div style="flex:1;font-size:12px;font-weight:600;">${n.name}</div>
+        <div style="display:flex;align-items:center;gap:4px;background:var(--card2);border:1.5px solid var(--border2);border-radius:8px;padding:5px 9px;width:110px;">
+          <input class="cei" type="number" placeholder="0" value="${capMap[n.id]||0}" id="mcap_${n.id}" min="0">
+          <span style="font-size:10px;color:var(--muted2);">FCFA</span>
+        </div>
+      </div>`).join('')}
+    <div style="margin-top:14px;">
+      <button class="btn btng" onclick="saveMgrCap()">💾 Enregistrer le capital</button>
+    </div>`;
+  openM('mgrCapM');
+}
+
+async function saveMgrCap(){
+  const mgrId=A._capMgrId;
+  if(!mgrId)return;
+  const nets=A.nets.filter(n=>n.active);
+  let ok=true;
+  for(const n of nets){
+    const cap=parseInt(document.getElementById('mcap_'+n.id)?.value)||0;
+    const{error}=await sb.from('manager_networks').upsert(
+      {manager_id:mgrId,network_id:n.id,capital:cap},
+      {onConflict:'manager_id,network_id'}
+    );
+    if(error){toast('❌ '+error.message);ok=false;break;}
+  }
+  if(ok){toast('✅ Capital enregistré !');closeM('mgrCapM');}
 }
 
 async function openMgrD(mgrId){
@@ -760,40 +875,75 @@ async function delMgr(id,name){
 function copyCode(){try{navigator.clipboard.writeText(A.profile.invite_code);}catch(e){}toast('📋 Code copié : '+A.profile.invite_code);}
 
 async function oConf(){
-  // Load manager_networks to compute capital totals per network
-  const activeMgrIds=A.managers.filter(m=>m.status==='active').map(m=>m.id);
-  let netCapMap={};
+  // Charger tous les capitaux par gérant/réseau
+  const activeMgrs=A.managers.filter(m=>m.status==='active');
+  const activeMgrIds=activeMgrs.map(m=>m.id);
+  let allMgrNets=[];
   if(activeMgrIds.length>0){
-    const{data:mgrNets}=await sb.from('manager_networks').select('network_id,capital').in('manager_id',activeMgrIds);
-    (mgrNets||[]).forEach(mn=>{netCapMap[mn.network_id]=(netCapMap[mn.network_id]||0)+Number(mn.capital||0);});
+    const{data}=await sb.from('manager_networks').select('manager_id,network_id,capital').in('manager_id',activeMgrIds);
+    allMgrNets=data||[];
   }
+  // Capital total par réseau (somme de tous les gérants)
+  const netCapMap={};
+  allMgrNets.forEach(mn=>{netCapMap[mn.network_id]=(netCapMap[mn.network_id]||0)+Number(mn.capital||0);});
   const totalCap=Object.values(netCapMap).reduce((a,v)=>a+v,0);
+
+  // Capital par gérant (pour l'affichage détaillé)
+  const mgrCapMap={};
+  activeMgrs.forEach(m=>{mgrCapMap[m.id]={name:m.full_name,nets:{}};});
+  allMgrNets.forEach(mn=>{if(mgrCapMap[mn.manager_id])mgrCapMap[mn.manager_id].nets[mn.network_id]=Number(mn.capital||0);});
 
   document.getElementById('ownerC').innerHTML=`
   <div class="sh"><div class="st">Configuration</div></div>
+
+  <!-- CAPITAL GLOBAL -->
   <div class="card" style="margin-bottom:11px;">
-    <div class="sh" style="margin-bottom:8px;"><div class="st" style="font-size:12px;">🏦 Capital global (automatique)</div></div>
-    <div style="padding:13px;background:rgba(255,201,77,.05);border:1.5px solid rgba(255,201,77,.2);border-radius:var(--r2);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+    <div class="sh" style="margin-bottom:8px;"><div class="st" style="font-size:12px;">🏦 Capital global</div></div>
+    <div style="padding:13px;background:rgba(255,201,77,.05);border:1.5px solid rgba(255,201,77,.2);border-radius:var(--r2);margin-bottom:11px;display:flex;align-items:center;justify-content:space-between;">
       <div>
-        <div style="font-size:10px;color:var(--muted2);margin-bottom:3px;">TOTAL — tous gérants actifs</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--yellow);">${fmt(totalCap)} FCFA</div>
+        <div style="font-size:10px;color:var(--muted2);margin-bottom:3px;">TOTAL TOUS GÉRANTS ACTIFS</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:var(--yellow);">${fmt(totalCap)} FCFA</div>
       </div>
-      <div style="font-size:24px;">🏦</div>
+      <div style="font-size:26px;">🏦</div>
     </div>
-    <div style="font-size:10px;color:var(--muted2);margin-bottom:9px;">Détail par réseau (somme de tous les gérants actifs)</div>
+
+    <!-- Par réseau (global) -->
+    <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">Par réseau — total</div>
     ${A.nets.map(n=>{
       const nc=netCapMap[n.id]||0;
-      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-        <div style="width:7px;height:7px;border-radius:50%;background:${n.color};flex-shrink:0;"></div>
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);">
+        <div style="width:8px;height:8px;border-radius:50%;background:${n.color};flex-shrink:0;"></div>
         <div style="flex:1;font-size:12px;font-weight:600;">${n.name}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--yellow);">${fmt(nc)} F</div>
       </div>`;
     }).join('')}
+
+    <!-- Par gérant (détail) -->
+    ${activeMgrs.length>0?`
+    <div style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 7px;">Détail par gérant</div>
+    ${activeMgrs.map(m=>{
+      const mgrTotal=Object.values(mgrCapMap[m.id]?.nets||{}).reduce((a,v)=>a+v,0);
+      return `<div style="padding:8px 10px;background:var(--card2);border:1px solid var(--border2);border-radius:var(--r2);margin-bottom:6px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+          <div style="font-size:12px;font-weight:700;">👤 ${m.full_name}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--yellow);">${fmt(mgrTotal)} F</div>
+        </div>
+        ${A.nets.filter(n=>n.active).map(n=>{
+          const c=mgrCapMap[m.id]?.nets[n.id]||0;
+          return c>0?`<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted2);margin-top:2px;"><span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${n.color};margin-right:4px;"></span>${n.name}</span><span style="font-family:'JetBrains Mono',monospace;color:var(--muted3);">${fmt(c)} F</span></div>`:''
+        }).join('')}
+        <button onclick="openMgrCap('${m.id}','${m.full_name}')" style="margin-top:8px;width:100%;padding:5px;border-radius:7px;background:rgba(255,201,77,.07);border:1px solid rgba(255,201,77,.18);color:var(--yellow);font-size:10px;font-weight:700;cursor:pointer;">✏️ Modifier</button>
+      </div>`;
+    }).join('')}`:'<div class="empty" style="padding:11px;">Aucun gérant actif</div>'}
   </div>
+
+  <!-- RÉSEAUX -->
   <div class="card" style="margin-bottom:11px;">
     <div class="sh" style="margin-bottom:7px;"><div class="st" style="font-size:12px;">🌐 Réseaux</div><div class="sa" onclick="initCP();openM('netM')">+ Ajouter</div></div>
-    ${A.nets.map((n,i)=>`<div class="li"><div class="liico" style="background:rgba(255,255,255,.03);"><div style="width:9px;height:9px;border-radius:50%;background:${n.color}"></div></div><div class="libody"><div class="lititle">${n.name}</div><div class="lisub">Dép ${n.rate_dep}% · Ret ${n.rate_ret}% · Cap total: ${fmtK(netCapMap[n.id]||0)} F</div></div><div class="tog ${n.active?'on':'off'}" onclick="togNet('${n.id}',${!n.active})"></div></div>`).join('')}
+    ${A.nets.map(n=>`<div class="li"><div class="liico" style="background:rgba(255,255,255,.03);"><div style="width:9px;height:9px;border-radius:50%;background:${n.color}"></div></div><div class="libody"><div class="lititle">${n.name}</div><div class="lisub">Dép ${n.rate_dep}% · Ret ${n.rate_ret}% · Cap total: ${fmtK(netCapMap[n.id]||0)} F</div></div><div class="tog ${n.active?'on':'off'}" onclick="togNet('${n.id}',${!n.active})"></div></div>`).join('')}
   </div>
+
+  <!-- TAUX -->
   <div class="card">
     <div class="sh" style="margin-bottom:4px;"><div class="st" style="font-size:12px;">💰 Taux de commissions</div></div>
     ${A.nets.filter(n=>n.active).map(n=>`<div style="margin-bottom:10px;"><div style="display:flex;align-items:center;gap:6px;padding:6px 0 4px;"><div style="width:7px;height:7px;border-radius:50%;background:${n.color}"></div><div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;">${n.name}</div></div>${[{k:'rate_dep',i:'⬇️',l:'Dépôt'},{k:'rate_ret',i:'⬆️',l:'Retrait'},{k:'rate_for',i:'📶',l:'Forfait'},{k:'rate_cre',i:'📱',l:'Crédit'}].map(op=>`<div class="cer"><div class="ceico">${op.i}</div><div class="cen">${op.l}</div><div class="cew"><input class="cei" type="number" value="${n[op.k]||0}" step="0.5" id="r_${n.id}_${op.k}"><div class="cep">%</div></div></div>`).join('')}<div style="height:1px;background:var(--border);margin-top:4px;"></div></div>`).join('')}
