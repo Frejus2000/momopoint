@@ -190,9 +190,10 @@ const { createClient } = supabase;
 const sb = createClient(SB_URL, SB_KEY);
 
 const PLANS=[
-  {id:'mensuel', icon:'📅',name:'Mensuel',    price:'1 500 F', priceN:1500, days:30, feat:'Gérants illimités · 30 jours'},
-  {id:'trim',    icon:'📆',name:'Trimestriel',price:'4 000 F', priceN:4000, days:90, feat:'Gérants illimités · 90 jours',pop:true},
-  {id:'annuel',  icon:'🗓️',name:'Annuel',     price:'15 000 F',priceN:15000,days:365,feat:'Gérants illimités · 365 jours'},
+  {id:'essai',   icon:'🆓',name:'Essai',       price:'Gratuit', priceN:0,    days:0,   feat:'Période d\'essai personnalisée',custom:true},
+  {id:'mensuel', icon:'📅',name:'Mensuel',     price:'1 500 F', priceN:1500, days:30,  feat:'Gérants illimités · 30 jours'},
+  {id:'trim',    icon:'📆',name:'Trimestriel', price:'4 000 F', priceN:4000, days:90,  feat:'Gérants illimités · 90 jours',pop:true},
+  {id:'annuel',  icon:'🗓️',name:'Annuel',      price:'15 000 F',priceN:15000,days:365, feat:'Gérants illimités · 365 jours'},
 ];
 
 /* ══ ÉTAT GLOBAL ══ */
@@ -352,13 +353,19 @@ function pageKg(){
       </div>
       <div class="card">
         <div class="sh"><div class="st">2. Plan de licence</div></div>
-        <div class="plan-grid">
+        <div class="plan-grid" style="grid-template-columns:repeat(4,1fr);">
           ${PLANS.map(p=>`<div class="pcard ${p.pop?'pop':''}" onclick="selectPlan(this,'${p.id}')" data-pid="${p.id}">
             <div class="pname">${p.icon} ${p.name}</div>
             <div class="pprice">${p.price}</div>
             <div class="pfeat">${p.feat}</div>
             ${p.pop?'<div style="margin-top:5px;"><span class="pill pg" style="font-size:9px;">⭐ Populaire</span></div>':''}
+            ${p.custom?'<div style="margin-top:5px;"><span class="pill pp" style="font-size:9px;">✏️ Jours libres</span></div>':''}
           </div>`).join('')}
+        </div>
+        <div id="trialDaysWrap" style="display:none;margin-bottom:11px;">
+          <label class="lbl">Nombre de jours d'essai</label>
+          <input class="fi2" type="number" id="trialDays" placeholder="Ex: 7" min="1" max="365" value="7">
+          <div style="font-size:10px;color:var(--muted2);margin-top:3px;">Entrez le nombre de jours d'accès pour cette licence d'essai</div>
         </div>
       </div>
     </div>
@@ -405,7 +412,10 @@ async function loadRecent(){
 function selectPlan(el, pid){
   document.querySelectorAll('[data-pid]').forEach(e => e.classList.remove('sel'));
   el.classList.add('sel');
-  currentPlan = PLANS.find(p => p.id === pid); // ← utilise currentPlan
+  currentPlan = PLANS.find(p => p.id === pid);
+  // Show trial days input only for essai plan
+  const wrap = document.getElementById('trialDaysWrap');
+  if(wrap) wrap.style.display = currentPlan?.custom ? 'block' : 'none';
 }
 
 function doGen(){
@@ -413,10 +423,18 @@ function doGen(){
   if(!p){toast('⚠️ Sélectionnez un plan');return;}
   const name=document.getElementById('kgName').value.trim();
   if(!name){toast('⚠️ Entrez le nom du propriétaire');return;}
+  // For trial plan, get custom days
+  let days = p.days;
+  if(p.custom){
+    days = parseInt(document.getElementById('trialDays')?.value)||0;
+    if(days<1){toast('⚠️ Entrez un nombre de jours valide (minimum 1)');return;}
+  }
   genKey=`FP-${seg()}-${seg()}-${seg()}`;
   document.getElementById('kgKeyVal').textContent=genKey;
   document.getElementById('kgHint').textContent='Clé générée — enregistrez-la puis envoyez-la';
-  document.getElementById('kgMeta').textContent=`${p.name} · ${p.days} jours · ${p.price} · Gérants illimités`;
+  document.getElementById('kgMeta').textContent=`${p.name} · ${days} jours · ${p.price} · Gérants illimités`;
+  // Store custom days in currentPlan for save
+  currentPlan = {...p, days};
   ['savBtn','waBtn'].forEach(id=>{const b=document.getElementById(id);b.disabled=false;b.style.opacity='1';});
   toast('⚡ Clé générée !');
 }
@@ -461,7 +479,7 @@ function doWA(){
   if(!genKey)return;
   const name=document.getElementById('kgName').value.trim();
   const phone=document.getElementById('kgPhone').value.trim().replace(/\s+/g,'');
-  const p = currentPlan; // ← utilise currentPlan
+  const p = currentPlan;
   const msg=encodeURIComponent(
     `Bonjour ${name} 👋\n\n`+
     `Votre licence FlottiPay est prête !\n\n`+

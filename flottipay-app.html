@@ -6,6 +6,15 @@
 <title>FlottiPay</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('/flottipay-sw.js')
+      .then(r=>console.log('SW enregistré'))
+      .catch(e=>console.log('SW erreur:',e));
+  });
+}
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -530,6 +539,7 @@ async function checkAndLoadManager(){
   ]);
   A.nets=nets||[];A.notifs=notifs||[];
   if(A.nets.length)A.selNet=A.nets[0].name;
+  await loadMgrNetCaps();
   updateDot('manager');showV('app-manager');mTab(0);startRealtime();
 }
 
@@ -567,9 +577,11 @@ function renderNotifs(){
 }
 
 async function markRead(id){
-  await sb.from('notifications').update({read:true}).eq('id',id);
-  A.notifs=A.notifs.map(n=>n.id===id?{...n,read:true}:n);
+  // Delete notification once seen (instead of just marking read)
+  await sb.from('notifications').delete().eq('id',id);
+  A.notifs=A.notifs.filter(n=>n.id!==id);
   updateDot(A.role);
+  renderNotifs();
 }
 async function approveMgr(mgrId,reqId){
   await sb.from('manager_requests').update({status:'approved'}).eq('id',reqId);
@@ -727,43 +739,66 @@ async function renderMgrD(){
 }
 
 async function delMgr(id,name){
-  if(!confirm(`Supprimer le gérant ${name} ?\nSes transactions seront conservées. Cette action est irréversible.`))return;
+  if(!confirm(`Supprimer le gérant ${name} ?\n⚠️ Toutes ses transactions seront également supprimées. Cette action est irréversible.`))return;
+  // Delete transactions first (or they are cascade-deleted if FK is set)
+  const{error:txErr}=await sb.from('transactions').delete().eq('manager_id',id);
+  if(txErr){toast('❌ Erreur suppression transactions : '+txErr.message);return;}
+  // Delete deletion requests linked to this manager
+  await sb.from('deletion_requests').delete().eq('manager_id',id);
+  // Delete manager requests
+  await sb.from('manager_requests').delete().eq('manager_id',id);
+  // Delete notifications
+  await sb.from('notifications').delete().eq('user_id',id);
+  // Finally delete the manager
   const{error}=await sb.from('managers').delete().eq('id',id);
   if(error){toast('❌ '+error.message);return;}
-  toast(`✅ ${name} supprimé.`);oMgrs();
+  toast(`✅ ${name} et toutes ses transactions ont été supprimés.`);
+  const{data:mgrs}=await sb.from('managers').select('*').eq('owner_id',A.profile.id);
+  A.managers=mgrs||[];
+  oMgrs();
 }
 function copyCode(){try{navigator.clipboard.writeText(A.profile.invite_code);}catch(e){}toast('📋 Code copié : '+A.profile.invite_code);}
 
 async function oConf(){
+  // Load manager_networks to compute capital totals per network
+  const activeMgrIds=A.managers.filter(m=>m.status==='active').map(m=>m.id);
+  let netCapMap={};
+  if(activeMgrIds.length>0){
+    const{data:mgrNets}=await sb.from('manager_networks').select('network_id,capital').in('manager_id',activeMgrIds);
+    (mgrNets||[]).forEach(mn=>{netCapMap[mn.network_id]=(netCapMap[mn.network_id]||0)+Number(mn.capital||0);});
+  }
+  const totalCap=Object.values(netCapMap).reduce((a,v)=>a+v,0);
+
   document.getElementById('ownerC').innerHTML=`
   <div class="sh"><div class="st">Configuration</div></div>
   <div class="card" style="margin-bottom:11px;">
-    <div class="sh" style="margin-bottom:8px;"><div class="st" style="font-size:12px;">🏦 Capitaux</div></div>
-    <div style="margin-bottom:10px;"><label class="lbl">Capital global (FCFA)</label>
-      <div style="display:flex;align-items:center;gap:7px;background:var(--card2);border:1.5px solid var(--border2);border-radius:var(--r2);padding:10px 12px;">
-        <input style="flex:1;background:none;border:none;outline:none;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:var(--yellow);" type="number" value="${A.profile.capital||0}" id="capG"><span style="font-size:11px;color:var(--muted2);">FCFA</span>
+    <div class="sh" style="margin-bottom:8px;"><div class="st" style="font-size:12px;">🏦 Capital global (automatique)</div></div>
+    <div style="padding:13px;background:rgba(255,201,77,.05);border:1.5px solid rgba(255,201,77,.2);border-radius:var(--r2);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:10px;color:var(--muted2);margin-bottom:3px;">TOTAL — tous gérants actifs</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--yellow);">${fmt(totalCap)} FCFA</div>
       </div>
+      <div style="font-size:24px;">🏦</div>
     </div>
-    <label class="lbl">Capital par réseau</label>
-    ${A.nets.map((n,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);"><div style="width:7px;height:7px;border-radius:50%;background:${n.color};flex-shrink:0;"></div><div style="flex:1;font-size:12px;font-weight:600;">${n.name}</div><div style="display:flex;align-items:center;gap:4px;background:var(--card2);border:1.5px solid var(--border2);border-radius:8px;padding:5px 8px;width:100px;"><input style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--yellow);width:60px;background:none;border:none;outline:none;" type="number" value="${n.capital||0}" id="capN_${i}"><span style="font-size:10px;color:var(--muted2);">F</span></div></div>`).join('')}
-    <button class="btn btng" style="margin-top:11px;" onclick="saveCaps()">💾 Enregistrer</button>
+    <div style="font-size:10px;color:var(--muted2);margin-bottom:9px;">Détail par réseau (somme de tous les gérants actifs)</div>
+    ${A.nets.map(n=>{
+      const nc=netCapMap[n.id]||0;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <div style="width:7px;height:7px;border-radius:50%;background:${n.color};flex-shrink:0;"></div>
+        <div style="flex:1;font-size:12px;font-weight:600;">${n.name}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--yellow);">${fmt(nc)} F</div>
+      </div>`;
+    }).join('')}
   </div>
   <div class="card" style="margin-bottom:11px;">
     <div class="sh" style="margin-bottom:7px;"><div class="st" style="font-size:12px;">🌐 Réseaux</div><div class="sa" onclick="initCP();openM('netM')">+ Ajouter</div></div>
-    ${A.nets.map((n,i)=>`<div class="li"><div class="liico" style="background:rgba(255,255,255,.03);"><div style="width:9px;height:9px;border-radius:50%;background:${n.color}"></div></div><div class="libody"><div class="lititle">${n.name}</div><div class="lisub">Dép ${n.rate_dep}% · Ret ${n.rate_ret}% · Cap: ${fmtK(n.capital)} F</div></div><div class="tog ${n.active?'on':'off'}" onclick="togNet('${n.id}',${!n.active})"></div></div>`).join('')}
+    ${A.nets.map((n,i)=>`<div class="li"><div class="liico" style="background:rgba(255,255,255,.03);"><div style="width:9px;height:9px;border-radius:50%;background:${n.color}"></div></div><div class="libody"><div class="lititle">${n.name}</div><div class="lisub">Dép ${n.rate_dep}% · Ret ${n.rate_ret}% · Cap total: ${fmtK(netCapMap[n.id]||0)} F</div></div><div class="tog ${n.active?'on':'off'}" onclick="togNet('${n.id}',${!n.active})"></div></div>`).join('')}
   </div>
   <div class="card">
     <div class="sh" style="margin-bottom:4px;"><div class="st" style="font-size:12px;">💰 Taux de commissions</div></div>
     ${A.nets.filter(n=>n.active).map(n=>`<div style="margin-bottom:10px;"><div style="display:flex;align-items:center;gap:6px;padding:6px 0 4px;"><div style="width:7px;height:7px;border-radius:50%;background:${n.color}"></div><div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;">${n.name}</div></div>${[{k:'rate_dep',i:'⬇️',l:'Dépôt'},{k:'rate_ret',i:'⬆️',l:'Retrait'},{k:'rate_for',i:'📶',l:'Forfait'},{k:'rate_cre',i:'📱',l:'Crédit'}].map(op=>`<div class="cer"><div class="ceico">${op.i}</div><div class="cen">${op.l}</div><div class="cew"><input class="cei" type="number" value="${n[op.k]||0}" step="0.5" id="r_${n.id}_${op.k}"><div class="cep">%</div></div></div>`).join('')}<div style="height:1px;background:var(--border);margin-top:4px;"></div></div>`).join('')}
     <button class="btn btng" onclick="saveRates()">💾 Enregistrer les taux</button>
   </div>`;
-}
-async function saveCaps(){
-  const g=parseInt(document.getElementById('capG')?.value)||0;
-  await sb.from('owners').update({capital:g}).eq('id',A.profile.id);
-  A.profile.capital=g;
-  for(let i=0;i<A.nets.length;i++){const cap=parseInt(document.getElementById('capN_'+i)?.value)||0;await sb.from('networks').update({capital:cap}).eq('id',A.nets[i].id);A.nets[i].capital=cap;}
-  toast('✅ Capitaux enregistrés !');
 }
 async function saveRates(){
   for(const n of A.nets.filter(x=>x.active)){
@@ -801,26 +836,29 @@ function mTx(){
   const rate=net?net[rk]||0:0;
   const ctr=COUNTRIES.find(c=>c.code===A.selCty)||COUNTRIES[0];
   const OO={dep:{i:'⬇️',c:'adep'},ret:{i:'⬆️',c:'aret'},for:{i:'📶',c:'afor'},cre:{i:'📱',c:'acre'}};
+  // Capital du gérant pour ce réseau (depuis manager_networks)
+  const mgrNetCap=A.mgrNetCaps?A.mgrNetCaps[net?.id]||0:0;
   document.getElementById('managerC').innerHTML=`
-  <div style="padding:4px 0 9px;"><div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;">Nouvelle transaction</div><div style="font-size:11px;color:var(--muted2);">👤 ${A.profile.full_name}</div></div>
+  <div style="padding:4px 0 9px;"><div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;">Nouvelle transaction</div><div style="font-size:11px;color:var(--muted2);">👤 ${A.profile.full_name}${!navigator.onLine?'<span style="margin-left:6px;padding:2px 7px;border-radius:9px;background:rgba(255,92,56,.12);border:1px solid rgba(255,92,56,.25);color:var(--warn);font-size:9px;">📵 Hors ligne</span>':''}</div></div>
   <div style="margin-bottom:10px;"><label class="lbl">Type d'opération</label><div class="opgrid">${Object.entries(OO).map(([k,v])=>`<div class="opcard ${A.selOp===k?v.c:''}" onclick="A.selOp='${k}';mTab(0)"><span class="opico">${v.i}</span><span class="oplbl">${OL[k]}</span></div>`).join('')}</div></div>
   <div style="margin-bottom:10px;"><label class="lbl">Réseau</label><div style="display:flex;gap:5px;flex-wrap:wrap;">${nets.map(n=>`<div style="padding:5px 11px;border-radius:20px;font-size:11px;font-weight:700;border:1.5px solid ${A.selNet===n.name?n.color:'var(--border)'};color:${A.selNet===n.name?n.color:'var(--muted2)'};background:var(--card2);cursor:pointer;" onclick="A.selNet='${n.name}';mTab(0)"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${n.color};margin-right:3px;vertical-align:middle;"></span>${n.name}</div>`).join('')}</div></div>
-  ${net?.capital>0?`<div style="padding:8px 11px;background:rgba(255,201,77,.05);border:1px solid rgba(255,201,77,.15);border-radius:9px;margin-bottom:10px;"><div style="font-size:10px;color:var(--muted2);">Capital ${A.selNet||'—'} : <strong style="color:var(--yellow);">${fmt(net.capital)} FCFA</strong></div></div>`:''}
+  ${mgrNetCap>0?`<div style="padding:8px 11px;background:rgba(255,201,77,.05);border:1px solid rgba(255,201,77,.15);border-radius:9px;margin-bottom:10px;"><div style="font-size:10px;color:var(--muted2);">Mon capital ${A.selNet||'—'} : <strong style="color:var(--yellow);">${fmt(mgrNetCap)} FCFA</strong></div></div>`:''}
   <div style="margin-bottom:10px;"><label class="lbl">Numéro client</label>
     <div class="pf-wrap">
       <div class="csel"><span style="font-size:14px;">${ctr.flag}</span><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted2);">${ctr.prefix}</span><select onchange="A.selCty=this.value;mTab(0)">${COUNTRIES.map(c=>`<option value="${c.code}" ${c.code===A.selCty?'selected':''}>${c.flag} ${c.prefix} ${c.name}</option>`).join('')}</select></div>
-      <div class="pf-num"><span class="pf-pre" id="prefDisplay">${ctr.prefix}</span><input type="tel" id="cPhone" placeholder="01 90 92 93 94" style="letter-spacing:.4px;"></div>
+      <div class="pf-num"><span class="pf-pre">${ctr.prefix}</span><input type="tel" id="cPhone" placeholder="01 90 92 93 94" style="letter-spacing:.4px;"></div>
     </div>
   </div>
   <div style="margin-bottom:10px;"><label class="lbl">Montant (FCFA)</label>
-    <div class="afield"><input style="background:none;border:none;outline:none;font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:var(--text);width:100%;" type="number" id="txAmt" value="25000" oninput="calcComm(${rate})"><span class="acur">FCFA</span></div>
+    <div class="afield"><input style="background:none;border:none;outline:none;font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:var(--text);width:100%;" type="number" id="txAmt" placeholder="0" oninput="calcComm(${rate})"><span class="acur">FCFA</span></div>
   </div>
   <div class="cdisp" style="margin-bottom:9px;">
-    <div><div style="font-size:11px;color:var(--muted2);">Commission (${OL[A.selOp]} ${A.selNet||'—'})</div><div style="font-size:10px;color:var(--muted);margin-top:1px;">Taux : ${rate}% · Capital: ${fmt(net?.capital||0)} F</div></div>
-    <div style="text-align:right;"><div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="commVal">+ ${fmt(Math.round(25000*rate/100))} F</div><div style="font-size:9px;color:var(--muted2);">calculé auto</div></div>
+    <div><div style="font-size:11px;color:var(--muted2);">Commission (${OL[A.selOp]} ${A.selNet||'—'})</div><div style="font-size:10px;color:var(--muted);margin-top:1px;">Taux : ${rate}%</div></div>
+    <div style="text-align:right;"><div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="commVal">+ 0 F</div><div style="font-size:9px;color:var(--muted2);">calculé auto</div></div>
   </div>
   <div class="lock-n">🔒 Transaction verrouillée après validation</div>
-  <button class="btn btnb" onclick="subTx(${rate})">✅ Valider la transaction</button>`;
+  <button class="btn btnb" onclick="subTx(${rate})">✅ Valider la transaction</button>
+  ${getPendingOfflineCount()>0?`<div style="margin-top:9px;padding:8px 11px;background:rgba(255,201,77,.07);border:1px solid rgba(255,201,77,.2);border-radius:9px;font-size:11px;color:var(--yellow);">📤 ${getPendingOfflineCount()} transaction(s) en attente de synchronisation</div>`:''}`;
 }
 
 function calcComm(rate){const a=parseFloat(document.getElementById('txAmt')?.value)||0;const el=document.getElementById('commVal');if(el)el.textContent='+ '+fmt(Math.round(a*rate/100))+' F';}
@@ -833,14 +871,22 @@ async function subTx(rate){
   const phone=document.getElementById('cPhone')?.value?.trim();
   const ctr=COUNTRIES.find(c=>c.code===A.selCty)||COUNTRIES[0];
   const comm=Math.round(amt*rate/100);
-  const{error}=await sb.from('transactions').insert({
+  const payload={
     owner_id:A.profile.owner_id,manager_id:A.profile.id,
     network_name:net.name,network_color:net.color,
     type:A.selOp,amount:amt,commission:comm,rate,
     client_phone:phone,client_country:A.selCty,client_prefix:ctr.prefix,
     date:new Date().toISOString().slice(0,10),
     time:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
-  });
+  };
+  // Si hors ligne, sauvegarder localement
+  if(!navigator.onLine){
+    addOfflineTx(payload);
+    toast('📵 Sauvegardé hors ligne — sera envoyé à la reconnexion');
+    mTab(0);
+    return;
+  }
+  const{error}=await sb.from('transactions').insert(payload);
   if(error){toast('❌ Erreur : '+error.message);return;}
   toast('✅ Transaction validée et verrouillée !');
   mTab(0);
@@ -933,7 +979,45 @@ async function submitDel(){
 }
 
 /* ══ INIT ══ */
+/* ══ OFFLINE ENGINE ════════════════════════════════════════
+   Stocke les transactions localement quand hors ligne.
+   Les synchronise automatiquement quand la connexion revient.
+══════════════════════════════════════════════════════════ */
+const OFFLINE_KEY='flottipay_offline_txs';
+function getOfflineTxs(){try{return JSON.parse(localStorage.getItem(OFFLINE_KEY)||'[]');}catch(e){return[];}}
+function saveOfflineTxs(txs){localStorage.setItem(OFFLINE_KEY,JSON.stringify(txs));}
+function getPendingOfflineCount(){return getOfflineTxs().length;}
+function addOfflineTx(tx){
+  const txs=getOfflineTxs();
+  const entry={...tx,_offline_id:Date.now()+'_'+Math.random().toString(36).slice(2,6),_pending:true};
+  txs.push(entry);saveOfflineTxs(txs);return entry;
+}
+async function syncOfflineTxs(){
+  const txs=getOfflineTxs();
+  if(!txs.length||!navigator.onLine)return;
+  let synced=0;const remaining=[];
+  for(const tx of txs){
+    const{_offline_id,_pending,...payload}=tx;
+    const{error}=await sb.from('transactions').insert(payload);
+    if(!error){synced++;}else{remaining.push(tx);}
+  }
+  saveOfflineTxs(remaining);
+  if(synced>0){toast(`☁️ ${synced} transaction(s) synchronisée(s) !`);if(A.role==='manager')mTab(0);}
+}
+window.addEventListener('online',()=>{toast('🌐 Connexion rétablie — synchronisation...');setTimeout(syncOfflineTxs,1200);});
+window.addEventListener('offline',()=>{toast('📵 Mode hors ligne — vos saisies seront sauvegardées.');});
+
+// Charge le capital du gérant par réseau
+async function loadMgrNetCaps(){
+  if(A.role!=='manager')return;
+  const{data}=await sb.from('manager_networks').select('network_id,capital').eq('manager_id',A.profile.id);
+  A.mgrNetCaps={};
+  (data||[]).forEach(mn=>{A.mgrNetCaps[mn.network_id]=Number(mn.capital||0);});
+}
+
 checkSession();
+// Sync au chargement si en ligne
+if(navigator.onLine)setTimeout(syncOfflineTxs,2500);
 </script>
 </body>
 </html>
