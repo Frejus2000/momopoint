@@ -9,7 +9,7 @@
 const SB_URL       = 'https://yweojpsawxkwyfwqqttt.supabase.co';
 const SB_KEY       = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3ZW9qcHNhd3hrd3lmd3FxdHR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NDQ3NDEsImV4cCI6MjA5MjEyMDc0MX0.pGlUyns7b-kT3LHj_-nnqYtYeItcUv-_duTG9gCPzu8';
 const ADMIN_EMAIL  = 'frejusglessougbe@gmail.com';
-const ADMIN_WA_NUMBER = '22901909293'; // Sans espaces ni tirets
+const ADMIN_WA_NUMBER = '2290195916665'; // Sans espaces ni tirets
 
 const { createClient } = supabase;
 const sb = createClient(SB_URL, SB_KEY);
@@ -667,7 +667,7 @@ function doWA() {
   const phone = document.getElementById('kgPhone').value.trim().replace(/\s+/g, '');
   const p     = currentPlan;
   const msg   = encodeURIComponent(
-    `Bonjour ${name} 👋\n\nVotre licence MomoPoint est prête !\n\n🔑 *Clé de licence :*\n${genKey}\n\n📦 Plan : ${p?.name || '—'} (${p?.days || 0} jours)\n♾️ Gérants illimités inclus\n\n🌐 Créez votre compte ici :\n👉 https://TON-SITE.netlify.app/momopoint-app.html\n\n⚠️ Cette clé est personnelle et ne peut être utilisée qu'une seule fois.\n\n_— MomoPoint, gestion de cabines mobile money_`
+    `Bonjour ${name} 👋\n\nVotre licence MomoPoint est prête !\n\n🔑 *Clé de licence :*\n${genKey}\n\n📦 Plan : ${p?.name || '—'} (${p?.days || 0} jours)\n♾️ Gérants illimités inclus\n\n🌐 Créez votre compte ici :\n👉 https://frejus2000.github.io/momopoint/momopoint-app.html\n\n⚠️ Cette clé est personnelle et ne peut être utilisée qu'une seule fois.\n\n_— MomoPoint, gestion de cabines mobile money_`
   );
   window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
 }
