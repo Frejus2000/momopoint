@@ -27,7 +27,7 @@
 const SB_URL          = 'https://yweojpsawxkwyfwqqttt.supabase.co';
 const SB_KEY          = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3ZW9qcHNhd3hrd3lmd3FxdHR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NDQ3NDEsImV4cCI6MjA5MjEyMDc0MX0.pGlUyns7b-kT3LHj_-nnqYtYeItcUv-_duTG9gCPzu8';
 const ADMIN_EMAIL     = 'frejusglessougbe@gmail.com';
-const ADMIN_WA_NUMBER = '22901909293'; // Sans espaces ni tirets
+const ADMIN_WA_NUMBER = '2290195916665'; // Sans espaces ni tirets
 
 /** Pays supportés pour la saisie des numéros clients */
 const COUNTRIES = [
